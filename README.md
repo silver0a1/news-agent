@@ -168,3 +168,8 @@ This agent turns you into a tech trend expert without any effort. It's like havi
 - Costs almost nothing (~$2/month)
 
 You start it once, and from that moment forward, you have a continuously updating database of tech intelligence that most companies would pay thousands for. It's automation that actually works - set it and forget it, then check your insights whenever you want to make informed decisions.
+
+
+## Free Usage
+
+If you need free usage of an AI service, OpenAI allows a certain amount of free calls (2.5 million for some models) per day if you share your data with them. When you pay, it is for privacy or performance.
