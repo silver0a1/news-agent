@@ -1,6 +1,4 @@
-# What the Autonomous News Monitoring Agent Does
-
-##  The Big Picture
+# What It Does
 
 Imagine you want to stay on top of tech and AI news trends, but you don't have time to constantly check Hacker News, analyze what's happening, and track patterns. This agent is like having a 24/7 digital assistant that:
 
