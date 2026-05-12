@@ -1,20 +1,19 @@
 # What It Does
 
-Imagine you want to stay on top of tech and AI news trends, but you don't have time to constantly check Hacker News, analyze what's happening, and track patterns. This agent is like having a 24/7 digital assistant that:
+Imagine you want to stay on top of tech and AI news trends, but you don't have time to constantly check Hacker News, analyze what's happening, and track patterns. This agent is like having 24/7 digital eyes that:
 
-1. Monitors tech news for you around the clock
-2. Analyzes trends using AI to understand what's important  
-3. Saves insights in organized spreadsheets
-4. Runs forever without you having to do anything
-
-Think of it as a robot researcher that never sleeps, never gets tired, and costs less than a cup of coffee per month to operate.
+1. Monitors hackernews https://news.ycombinator.com for you around the clock
+2. Focuses on selected category of specific posts that are trending
+3. Classifies sentiment of the titles 
+4. Saves insights in organized spreadsheets
+5. Runs continuously and generates daily/weekly summary reports
 
 ---
 
 ##  What Happens Every 15 Minutes
 
 ### Step 1: News Hunting 
-- The agent visits Hacker News (a popular tech news site)
+- The agent visits Hacker News
 - Looks at the top 15 trending stories
 - Smart filtering: Only picks stories about AI, programming, startups, or tech
 - Example: Finds stories like "New AI breakthrough in medical diagnosis" or "Startup raises $50M for quantum computing"
