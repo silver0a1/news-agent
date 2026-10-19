@@ -1,0 +1,11 @@
+__pycache__/
+.pytest_cache/
+*.db
+*.db-wal
+*.db-shm
+exports/
+# Files written by the original CSV-based version
+agent_insights.csv
+daily_reports.csv
+seen_stories.csv
+last_report.txt

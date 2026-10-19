@@ -1,0 +1,14 @@
+# Autonomous Monitoring Agent requirements
+# After installing, fetch the browser once with: playwright install chromium
+
+# OpenAI API client for LLM analysis (behind news_agent/llm.py's LLMClient interface)
+openai>=1.0.0,<2.0.0
+
+# HTTP requests for the Hacker News API
+requests>=2.25.0,<3.0.0
+
+# Headless Chromium for reading linked articles
+playwright>=1.40.0,<2.0.0
+
+# Development / tests
+pytest>=7.0.0
