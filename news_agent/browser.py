@@ -2,14 +2,26 @@
 
 import os
 from dataclasses import dataclass
+from pathlib import Path
 
 BLOCKED_RESOURCES = {"image", "media", "font", "stylesheet"}
 SKIPPED_EXTENSIONS = (".pdf", ".zip", ".gz", ".tar", ".mp4", ".mp3", ".png", ".jpg", ".jpeg", ".gif")
+VENDOR_DIR = Path(__file__).parent / "vendor" / "readability"
 
-# Runs in the page. Picks <article>, else <main>, else the element holding the most <p> text,
+# Shared by both extractors: readable text from headings, paragraphs, list items and quotes.
+BLOCK_TEXT_JS = r"""
+  const blockText = el => {
+    const blocks = [...el.querySelectorAll('h1,h2,h3,h4,p,li,pre,blockquote')]
+      .map(b => (b.textContent || '').replace(/\s+/g, ' ').trim())
+      .filter(Boolean);
+    return blocks.length ? blocks.join('\n\n') : (el.textContent || '').replace(/\s+/g, ' ').trim();
+  };
+"""
+
+# Fallback extractor. Picks <article>, else <main>, else the element holding the most <p> text,
 # after removing navigation and other page chrome.
 EXTRACT_JS = r"""
-() => {
+() => {""" + BLOCK_TEXT_JS + r"""
   const drop = 'script,style,noscript,nav,header,footer,aside,form,iframe,svg,' +
                '[role=navigation],[role=banner],[role=contentinfo],[aria-hidden=true]';
   const root = document.body ? document.body.cloneNode(true) : null;
@@ -32,14 +44,46 @@ EXTRACT_JS = r"""
     return best;
   };
 
-  const el = pick();
-  const blocks = [...el.querySelectorAll('h1,h2,h3,h4,p,li,pre,blockquote')]
-    .map(b => (b.textContent || '').replace(/\s+/g, ' ').trim())
-    .filter(Boolean);
-  const text = blocks.length ? blocks.join('\n\n') : (el.textContent || '').replace(/\s+/g, ' ').trim();
-  return {title: document.title || '', text};
+  return {title: document.title || '', text: blockText(pick())};
 }
 """
+
+
+def _reader_js():
+    """Reader-mode extractor: Mozilla Readability (vendored), gated by isProbablyReaderable.
+
+    Both library files are inlined into the function body so nothing leaks into the page's
+    globals, and page.evaluate runs over CDP, so a site's CSP can't block it.
+    """
+    readerable_src = (VENDOR_DIR / "Readability-readerable.js").read_text(encoding="utf-8")
+    readability_src = (VENDOR_DIR / "Readability.js").read_text(encoding="utf-8")
+    return ("() => {\n" + readerable_src + "\n" + readability_src + "\n" + BLOCK_TEXT_JS + r"""
+  const out = {readerable: false, title: '', text: '', error: ''};
+  try {
+    out.readerable = isProbablyReaderable(document);
+  } catch (e) {
+    out.error = 'isProbablyReaderable: ' + e;
+    return out;
+  }
+  if (!out.readerable) return out;
+  try {
+    // Readability mutates the document it is given, so hand it a clone.
+    const article = new Readability(document.cloneNode(true)).parse();
+    if (article && article.content) {
+      const holder = document.createElement('div');
+      holder.innerHTML = article.content;
+      out.title = article.title || '';
+      out.text = blockText(holder);
+    }
+  } catch (e) {
+    out.error = 'Readability: ' + e;
+  }
+  return out;
+}
+""")
+
+
+READER_JS = _reader_js()
 
 
 @dataclass
@@ -50,6 +94,8 @@ class PageResult:
     title: str = ""
     text: str = ""
     error: str = ""
+    method: str = ""                  # "readability" | "fallback" ("" when nothing was extracted)
+    readerable: bool | None = None    # isProbablyReaderable verdict; None if it never ran
 
 
 class PageFetcher:
@@ -59,8 +105,9 @@ class PageFetcher:
             result = fetcher.fetch("https://example.com/post")
     """
 
-    def __init__(self, timeout_s=20, headless=True, chromium_path=""):
+    def __init__(self, timeout_s=20, headless=True, chromium_path="", readability_min_chars=500):
         self.timeout_ms = int(timeout_s * 1000)
+        self.readability_min_chars = readability_min_chars
         self.headless = headless
         self.chromium_path = chromium_path or os.getenv("NEWS_AGENT_CHROMIUM_PATH", "")
         self._pw = None
@@ -126,10 +173,26 @@ class PageFetcher:
                 page.wait_for_load_state("networkidle", timeout=min(5000, self.timeout_ms))
             except Exception:
                 pass
-            extracted = page.evaluate(EXTRACT_JS)
-            return PageResult(url=url, status="ok", final_url=page.url,
-                              title=extracted.get("title", ""), text=extracted.get("text", ""))
+            return self._extract(page, url)
         except Exception as e:
             return PageResult(url=url, status="failed", error=f"{type(e).__name__}: {e}"[:300])
         finally:
             context.close()
+
+    def _extract(self, page, url):
+        """Reader mode first; the heuristic extractor when the page isn't readerable or
+        Readability returns nothing usable (null, an exception, or under the minimum length)."""
+        try:
+            reader = page.evaluate(READER_JS)
+        except Exception as e:
+            reader = {"readerable": None, "text": "", "error": f"reader script: {e}"[:200]}
+        readerable = reader.get("readerable")
+        reader_text = reader.get("text") or ""
+        if readerable and len(reader_text) >= self.readability_min_chars:
+            return PageResult(url=url, status="ok", final_url=page.url, method="readability",
+                              readerable=True, title=reader.get("title") or page.title(),
+                              text=reader_text)
+        extracted = page.evaluate(EXTRACT_JS)
+        return PageResult(url=url, status="ok", final_url=page.url, method="fallback",
+                          readerable=readerable, title=extracted.get("title", ""),
+                          text=extracted.get("text", ""), error=reader.get("error", ""))

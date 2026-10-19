@@ -74,3 +74,37 @@ def test_meta_roundtrip(storage):
     assert storage.get_meta("legacy_csv_imported") is None
     storage.set_meta("legacy_csv_imported", "2026-01-01")
     assert storage.get_meta("legacy_csv_imported") == "2026-01-01"
+
+
+def test_extraction_method_roundtrip(storage):
+    storage.upsert_story(make_story(1))
+    storage.save_article(1, "ok", text="x", method="readability", readerable=True)
+    article = storage.get_article(1)
+    assert article["extraction_method"] == "readability" and article["readerable"] == 1
+    storage.save_article(1, "failed", error="boom")
+    article = storage.get_article(1)
+    assert article["extraction_method"] == "none" and article["readerable"] is None
+
+
+def test_migrates_v1_database(tmp_path):
+    import sqlite3
+
+    from news_agent.storage import Storage
+
+    path = tmp_path / "old.db"
+    old = sqlite3.connect(path)
+    old.executescript("""
+        CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT);
+        INSERT INTO meta VALUES ('schema_version', '1');
+        CREATE TABLE articles (hn_id INTEGER PRIMARY KEY, fetched_at TEXT NOT NULL, status TEXT NOT NULL,
+                               final_url TEXT, error TEXT, text TEXT, content_hash TEXT, word_count INTEGER);
+        INSERT INTO articles (hn_id, fetched_at, status, text) VALUES (1, '2026-01-01', 'ok', 'old text');
+    """)
+    old.commit()
+    old.close()
+
+    with Storage(path) as s:
+        columns = {r["name"] for r in s.conn.execute("PRAGMA table_info(articles)")}
+        assert {"extraction_method", "readerable"} <= columns
+        assert s.get_article(1)["text"] == "old text"
+        assert s.get_meta("schema_version") == "2"

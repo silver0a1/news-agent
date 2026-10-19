@@ -36,6 +36,7 @@ class Settings:
     fetch_timeout_s: float = 20
     headless: bool = True
     chromium_path: str = ""           # optional explicit Chromium executable
+    readability_min_chars: int = 500  # shorter reader-mode output falls back to the heuristic extractor
 
     @classmethod
     def from_env(cls):
@@ -56,4 +57,5 @@ class Settings:
             fetch_timeout_s=_env("FETCH_TIMEOUT_S", cls.fetch_timeout_s, float),
             headless=_env("HEADLESS", cls.headless, bool),
             chromium_path=_env("CHROMIUM_PATH", cls.chromium_path),
+            readability_min_chars=_env("READABILITY_MIN_CHARS", cls.readability_min_chars, int),
         )

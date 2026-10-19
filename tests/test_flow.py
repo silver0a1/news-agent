@@ -37,7 +37,11 @@ class FakeFetcher:
 
     def fetch(self, url):
         FakeFetcher.fetched.append(url)
-        return PageResult(url=url, status="ok", final_url=url, text=f"Article body for {url}")
+        if url.endswith("/3"):
+            return PageResult(url=url, status="ok", final_url=url, text=f"Article body for {url}",
+                              method="fallback", readerable=False)
+        return PageResult(url=url, status="ok", final_url=url, text=f"Article body for {url}",
+                          method="readability", readerable=True)
 
 
 def shared_for(storage, stories, fail_launch=False, **settings):
@@ -50,7 +54,7 @@ def shared_for(storage, stories, fail_launch=False, **settings):
     }
 
 
-def test_full_cycle_stores_everything_and_is_idempotent(storage):
+def test_full_cycle_stores_everything_and_is_idempotent(storage, capsys):
     FakeFetcher.fetched = []
     # Highest-scoring new stories are fetched first when over the per-cycle cap.
     stories = [make_story(1, score=300), make_story(2, url="", score=200), make_story(3, score=100),
@@ -65,6 +69,10 @@ def test_full_cycle_stores_everything_and_is_idempotent(storage):
     assert sorted(storage.stories_needing_fetch()) == [4, 5]
     assert storage.get_article(2)["text"] == "Ask HN body"
     assert all(u for u in FakeFetcher.fetched)  # self post was not browsed
+    methods = dict(storage.conn.execute("SELECT hn_id, extraction_method FROM articles"))
+    assert methods == {1: "readability", 2: "self_post", 3: "fallback"}
+    assert ("📑 Extraction: readability 1 · fallback 1 (not readerable 1, too short/failed 0) "
+            "· self_post 1 · none 0") in capsys.readouterr().out
     report = storage.latest_report()
     assert report and report["story_count"] == 3
 
@@ -83,6 +91,7 @@ def test_browser_failure_still_analyses_from_title_and_comments(storage):
     shared = shared_for(storage, [make_story(7)], fail_launch=True)
     create_agent_flow(once=True).run(shared)
     assert storage.get_article(7)["status"] == "failed"
+    assert storage.get_article(7)["extraction_method"] == "none"
     assert storage.conn.execute("SELECT COUNT(*) FROM analyses").fetchone()[0] == 1
     assert "article text unavailable" in shared["llm"].calls[0]
 

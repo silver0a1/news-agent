@@ -3,6 +3,7 @@ never bulk text: content lives in SQLite and is loaded per story when needed."""
 
 import datetime
 import time
+from collections import Counter
 
 from .browser import PageFetcher, PageResult
 from .context import build_story_prompt, estimate_tokens, map_reduce, parse_analysis
@@ -89,20 +90,35 @@ class FetchNode(Node):
         for story in stories:
             if not story.get("url"):  # Ask HN / Show HN self post: the text is the article
                 results[story["hn_id"]]["page"] = PageResult(
-                    url="", status="ok", text=story.get("self_text") or "")
+                    url="", status="ok", text=story.get("self_text") or "", method="self_post")
         return results
 
     def post(self, shared, ctx, results):
         storage = shared["storage"]
+        methods, fallback_reasons = Counter(), Counter()
         for hn_id, result in results.items():
             page = result["page"]
-            storage.save_article(hn_id, page.status, text=page.text, final_url=page.final_url, error=page.error)
+            method = page.method if page.status == "ok" and page.method else "none"
+            methods[method] += 1
+            if method == "fallback":
+                fallback_reasons["not readerable" if page.readerable is False else "too short/failed"] += 1
+            storage.save_article(hn_id, page.status, text=page.text, final_url=page.final_url,
+                                 error=page.error, method=method, readerable=page.readerable)
             storage.save_comments(hn_id, result["comments"])
             storage.finalize_content(hn_id)
             words = len(page.text.split())
-            print(f"💾 {hn_id}: page {page.status} ({words} words), {len(result['comments'])} comments"
+            print(f"💾 {hn_id}: page {page.status} via {method} ({words} words), {len(result['comments'])} comments"
                   + (f" — {page.error[:80]}" if page.error else ""))
+        if results:
+            print(extraction_summary(methods, fallback_reasons))
         return "analyze"
+
+
+def extraction_summary(methods, fallback_reasons):
+    """One line per cycle showing which extractor produced each article."""
+    reasons = ", ".join(f"{r} {fallback_reasons[r]}" for r in ("not readerable", "too short/failed"))
+    return (f"📑 Extraction: readability {methods['readability']} · fallback {methods['fallback']} "
+            f"({reasons}) · self_post {methods['self_post']} · none {methods['none']}")
 
 
 class AnalyzeNode(Node):
@@ -262,4 +278,5 @@ def create_agent_flow(once=False):
 
 def make_fetcher_factory(settings):
     return lambda: PageFetcher(timeout_s=settings.fetch_timeout_s, headless=settings.headless,
-                               chromium_path=settings.chromium_path)
+                               chromium_path=settings.chromium_path,
+                               readability_min_chars=settings.readability_min_chars)

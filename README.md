@@ -50,7 +50,9 @@ Run the tests with `pytest`.
 
 ### Step 3: Browsing
 - Opens each new story's link in headless Chromium (Playwright), skipping images, fonts and media for speed
-- Extracts the main article text and strips navigation, sidebars and footers
+- Extracts the article in "reader mode" with Mozilla's Readability (the engine behind Firefox Reader View, bundled in `news_agent/vendor/readability`). Its `isProbablyReaderable` check decides whether to try it at all.
+- Pages that aren't readerable, or where reader mode returns nothing useful (under 500 characters), fall back to a simpler extractor that keeps the `<article>`/`<main>` content and strips navigation, sidebars and footers
+- Each article records which method produced it (`readability`, `fallback`, `self_post`, or `none`) and the readerable verdict, and every cycle prints a breakdown such as `📑 Extraction: readability 3 · fallback 2 (not readerable 1, too short/failed 1) · self_post 1 · none 0`
 - Pulls the top 20 HN comments for the community's take
 - Ask HN / Show HN posts use the post text itself; if a page can't be loaded, the story is still analysed from its title and comments
 
@@ -92,7 +94,7 @@ Everything is stored in `news_agent.db` (SQLite):
 |---|---|
 | `stories` | One row per HN story: id, title, URL, domain, first/last seen |
 | `score_snapshots` | Score, rank and comment count each time the story was seen |
-| `articles` | Fetched page text, fetch status/errors, content hash, word count |
+| `articles` | Fetched page text, fetch status/errors, content hash, word count, extraction method, readerable verdict |
 | `comments` | Top HN comments per story |
 | `analyses` | Summary, theme, sentiment, key points, entities, tokens used |
 | `analyses_fts` | Full-text search index over titles, summaries, themes, entities |
@@ -137,6 +139,7 @@ All settings are optional environment variables:
 | `NEWS_AGENT_FETCH_TIMEOUT_S` | `20` | Page load timeout |
 | `NEWS_AGENT_HEADLESS` | `true` | Set `false` to watch the browser |
 | `NEWS_AGENT_CHROMIUM_PATH` | (Playwright's) | Use a specific Chromium binary |
+| `NEWS_AGENT_READABILITY_MIN_CHARS` | `500` | Reader-mode text shorter than this falls back to the simple extractor |
 
 `HTTPS_PROXY` / `NO_PROXY` are passed through to the browser.
 
@@ -150,7 +153,8 @@ news_agent/
   config.py            # settings from environment variables
   llm.py               # LLMClient interface, OpenAI + fake clients
   sources/hackernews.py
-  browser.py           # Playwright page fetching + article extraction
+  browser.py           # Playwright page fetching + reader-mode / fallback extraction
+  vendor/readability/  # Mozilla Readability.js 0.6.0 (Apache-2.0), unmodified
   storage.py           # SQLite schema and queries, CSV import/export
   context.py           # token budgeting, packing, map-reduce
   nodes.py             # Collect -> Fetch -> Analyze -> Report -> Wait

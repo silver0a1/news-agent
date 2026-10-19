@@ -7,7 +7,7 @@ import json
 import sqlite3
 from pathlib import Path
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT);
@@ -41,7 +41,9 @@ CREATE TABLE IF NOT EXISTS articles (
     error        TEXT,
     text         TEXT,
     content_hash TEXT,
-    word_count   INTEGER
+    word_count   INTEGER,
+    extraction_method TEXT,          -- readability | fallback | self_post | none
+    readerable   INTEGER             -- isProbablyReaderable verdict: 1, 0, or NULL if it never ran
 );
 
 CREATE TABLE IF NOT EXISTS comments (
@@ -106,7 +108,21 @@ class Storage:
         if self.path != ":memory:":
             self.conn.execute("PRAGMA journal_mode = WAL")
         self.conn.executescript(SCHEMA)
-        self.conn.execute("INSERT OR IGNORE INTO meta VALUES ('schema_version', ?)", (str(SCHEMA_VERSION),))
+        self._migrate()
+        self.conn.execute("INSERT OR REPLACE INTO meta VALUES ('schema_version', ?)", (str(SCHEMA_VERSION),))
+        self.conn.commit()
+
+    # Columns added after the first release, applied to databases created by older versions.
+    MIGRATIONS = {
+        "articles": [("extraction_method", "TEXT"), ("readerable", "INTEGER")],
+    }
+
+    def _migrate(self):
+        for table, columns in self.MIGRATIONS.items():
+            existing = {r["name"] for r in self.conn.execute(f"PRAGMA table_info({table})")}
+            for name, decl in columns:
+                if name not in existing:
+                    self.conn.execute(f"ALTER TABLE {table} ADD COLUMN {name} {decl}")
         self.conn.commit()
 
     def close(self):
@@ -179,13 +195,15 @@ class Storage:
 
     # --- content -------------------------------------------------------------------------
 
-    def save_article(self, hn_id, status, text="", final_url="", error=""):
+    def save_article(self, hn_id, status, text="", final_url="", error="", method="none", readerable=None):
         text = text or ""
         self.conn.execute(
             """INSERT OR REPLACE INTO articles
-               (hn_id, fetched_at, status, final_url, error, text, content_hash, word_count)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
-            (hn_id, now_iso(), status, final_url, error, text, None, len(text.split())),
+               (hn_id, fetched_at, status, final_url, error, text, content_hash, word_count,
+                extraction_method, readerable)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (hn_id, now_iso(), status, final_url, error, text, None, len(text.split()),
+             method, None if readerable is None else int(bool(readerable))),
         )
         self.conn.commit()
 
@@ -313,7 +331,7 @@ class Storage:
     EXPORTS = {
         "stories": """SELECT s.hn_id, s.title, s.url, s.domain, s.posted_at, s.first_seen, s.last_seen,
                              (SELECT MAX(score) FROM score_snapshots WHERE hn_id = s.hn_id) AS max_score,
-                             a.status AS fetch_status, a.word_count
+                             a.status AS fetch_status, a.word_count, a.extraction_method, a.readerable
                       FROM stories s LEFT JOIN articles a USING (hn_id) ORDER BY s.first_seen""",
         "insights": """SELECT an.created_at AS timestamp, an.hn_id, s.title, an.theme, an.sentiment,
                               an.summary, an.entities
