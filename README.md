@@ -77,7 +77,7 @@ date,insights_analyzed,summary
 
 ---
 
-##  What Makes It "Autonomous"
+##  Key Features
 
 ### Runs Forever Without You
 - Set and forget: Start it once, runs until you stop it
